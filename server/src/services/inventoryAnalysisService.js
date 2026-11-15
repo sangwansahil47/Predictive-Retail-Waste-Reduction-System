@@ -54,9 +54,11 @@ function classifyInventoryStatus(currentStock, predictedMonthlySales) {
   };
 }
 
-export async function generateInventoryAnalysisReport(storeId = null) {
+// Scoped to one account: only its forecasts, batches and products are used.
+export async function generateInventoryAnalysisReport(ownerId, storeId = null) {
   const storeObjectId = storeId ? new mongoose.Types.ObjectId(storeId) : null;
-  const predictionQuery = storeObjectId ? { storeId: storeObjectId } : {};
+  const predictionQuery = { owner: ownerId };
+  if (storeObjectId) predictionQuery.storeId = storeObjectId;
   const latestPrediction = await PredictionReport.findOne(predictionQuery).sort({
     createdAt: -1,
   });
@@ -73,7 +75,10 @@ export async function generateInventoryAnalysisReport(storeId = null) {
       item.dailyAverageQuantity,
     ]),
   );
-  const matchStage = { quantityRemaining: { $gt: 0 } };
+  const matchStage = {
+    owner: new mongoose.Types.ObjectId(String(ownerId)),
+    quantityRemaining: { $gt: 0 },
+  };
   if (storeObjectId) matchStage.storeId = storeObjectId;
   const stockAggregations = await Batch.aggregate([
     { $match: matchStage },
@@ -85,7 +90,7 @@ export async function generateInventoryAnalysisReport(storeId = null) {
   const productIds = [
     ...new Set([...velocityMap.keys(), ...stockMap.keys()]),
   ];
-  const products = await Product.find({ _id: { $in: productIds } }).select("sku name");
+  const products = await Product.find({ owner: ownerId, _id: { $in: productIds } }).select("sku name");
   const productMap = new Map(products.map((product) => [product._id.toString(), product]));
   const productStatuses = [];
   const counts = {
@@ -115,6 +120,7 @@ export async function generateInventoryAnalysisReport(storeId = null) {
   }
 
   return InventoryAnalysisReport.create({
+    owner: ownerId,
     storeId: storeObjectId?.toString() ?? null,
     generatedAt: new Date(),
     totalProductsAnalyzed: productStatuses.length,

@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 const batchSchema = new mongoose.Schema(
   {
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     productId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Product",
@@ -9,6 +10,7 @@ const batchSchema = new mongoose.Schema(
       index: true,
     },
     batchId: { type: String, required: true, trim: true },
+    uploadId: { type: mongoose.Schema.Types.ObjectId, ref: "Upload", index: true },
     storeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Store",

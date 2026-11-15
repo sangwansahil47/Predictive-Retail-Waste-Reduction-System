@@ -13,16 +13,19 @@ const parseQuantity = (value) => {
   return Number(value);
 };
 
-export const saveInventoryBatch = async (records) => {
+// Every function is scoped to one account (`ownerId`): SKUs and store codes are
+// looked up only among that account's products and stores.
+
+export const saveInventoryBatch = async (records, { ownerId, uploadId } = {}) => {
   if (!records.length) return;
 
   const skus = [...new Set(records.map(({ sku }) => sku))];
   const storeCodes = [...new Set(records.map(({ storeCode }) => storeCode))];
   const [products, stores] = await Promise.all([
-    Product.find({ sku: { $in: skus } })
+    Product.find({ owner: ownerId, sku: { $in: skus } })
       .select("_id sku")
       .lean(),
-    Store.find({ storeCode: { $in: storeCodes } })
+    Store.find({ owner: ownerId, storeCode: { $in: storeCodes } })
       .select("_id storeCode")
       .lean(),
   ]);
@@ -44,6 +47,8 @@ export const saveInventoryBatch = async (records) => {
 
     return {
       batchId: record.batchId,
+      owner: ownerId,
+      ...(uploadId && { uploadId }),
       productId,
       storeId,
       quantityRemaining: record.quantityRemaining,
@@ -56,7 +61,7 @@ export const saveInventoryBatch = async (records) => {
   return Batch.insertMany(batches, { ordered: true });
 };
 
-export const addBatches = async (input = {}) => {
+export const addBatches = async (input, ownerId) => {
   input ??= {};
   const validation = validateInventoryRow({
     batch_id: input.batchId ?? input.batch_id,
@@ -70,32 +75,33 @@ export const addBatches = async (input = {}) => {
 
   if (!validation.isValid) throw invalidRequest(validation.errors.join(", "));
   const [product, store] = await Promise.all([
-    Product.findOne({ sku: validation.data.sku }).select("_id"),
-    Store.findOne({ storeCode: validation.data.storeCode }).select("_id"),
+    Product.findOne({ owner: ownerId, sku: validation.data.sku }).select("_id"),
+    Store.findOne({ owner: ownerId, storeCode: validation.data.storeCode }).select("_id"),
   ]);
   if (!product || !store)
     throw invalidRequest("Unknown product SKU or store code");
 
   return Batch.create({
     ...validation.data,
+    owner: ownerId,
     productId: product._id,
     storeId: store._id,
   });
 };
 
-export const deleteBatch = async (batchId) => {
+export const deleteBatch = async (batchId, ownerId) => {
   if (!mongoose.isValidObjectId(batchId))
     throw invalidRequest("Invalid batch ID");
-  const deletedBatch = await Batch.findByIdAndDelete(batchId);
+  const deletedBatch = await Batch.findOneAndDelete({ _id: batchId, owner: ownerId });
   if (!deletedBatch) throw notFound("Batch not found");
   return { message: "Batch successfully deleted", deletedBatch };
 };
 
-export const updateBatch = async (batchId, input) => {
+export const updateBatch = async (batchId, input, ownerId) => {
   input ??= {};
   if (!mongoose.isValidObjectId(batchId))
     throw invalidRequest("Invalid batch ID");
-  const existingBatch = await Batch.findById(batchId);
+  const existingBatch = await Batch.findOne({ _id: batchId, owner: ownerId });
   if (!existingBatch) throw notFound("Batch not found");
 
   const allowedFields = [
@@ -110,12 +116,12 @@ export const updateBatch = async (batchId, input) => {
     if (input[field] !== undefined) updates[field] = input[field];
   }
   if (input.sku !== undefined) {
-    const product = await Product.findOne({ sku: input.sku }).select("_id");
+    const product = await Product.findOne({ owner: ownerId, sku: input.sku }).select("_id");
     if (!product) throw invalidRequest("Unknown product SKU");
     updates.productId = product._id;
   }
   if (input.storeCode !== undefined) {
-    const store = await Store.findOne({ storeCode: input.storeCode }).select(
+    const store = await Store.findOne({ owner: ownerId, storeCode: input.storeCode }).select(
       "_id",
     );
     if (!store) throw invalidRequest("Unknown store code");
@@ -147,8 +153,8 @@ export const updateBatch = async (batchId, input) => {
   updates.quantityRemaining = nextRemaining;
   updates.initialQuantity = nextInitial;
 
-  const updatedBatch = await Batch.findByIdAndUpdate(
-    batchId,
+  const updatedBatch = await Batch.findOneAndUpdate(
+    { _id: batchId, owner: ownerId },
     { $set: updates },
     { new: true, runValidators: true },
   );
@@ -156,7 +162,8 @@ export const updateBatch = async (batchId, input) => {
   return updatedBatch;
 };
 
-export const getBatches = async (filters = {}, options = {}) => {
+export const getBatches = async (ownerId, filters = {}, options = {}) => {
+  const query = { ...filters, owner: ownerId };
   const page = Math.max(1, Number.parseInt(options.page, 10) || 1);
   const limit = Math.min(
     100,
@@ -165,14 +172,14 @@ export const getBatches = async (filters = {}, options = {}) => {
   const skip = (page - 1) * limit;
   const sort = options.sort || { expirationDate: 1 };
   const [batches, total] = await Promise.all([
-    Batch.find(filters)
+    Batch.find(query)
       .populate("productId", "sku name")
       .populate("storeId", "storeCode name")
       .sort(sort)
       .skip(skip)
       .limit(limit)
       .lean(),
-    Batch.countDocuments(filters),
+    Batch.countDocuments(query),
   ]);
 
   return {

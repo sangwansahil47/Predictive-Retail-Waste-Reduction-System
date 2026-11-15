@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { parseInventoryCsv } from "../utils/csvParser.js";
+import { runTrackedUpload } from "../services/upload.service.js";
 import {
   saveInventoryBatch,
   addBatches,
@@ -15,13 +16,19 @@ export const uploadInventoryCsv = async (req, res) => {
       .json({ success: false, message: "Please upload a valid CSV file." });
   }
 
-  const result = await parseInventoryCsv(req.file.buffer, saveInventoryBatch);
+  const result = await runTrackedUpload({
+    type: "inventory",
+    file: req.file,
+    user: req.user,
+    parse: parseInventoryCsv,
+    save: saveInventoryBatch,
+  });
   return res.status(200).json({ success: true, ...result });
 };
 
 export const addInventoryBatch = async (req, res) => {
   try {
-    const batch = await addBatches(req.body);
+    const batch = await addBatches(req.body, req.user.id);
     return res.status(201).json({
       success: true,
       message: "Batch created successfully",
@@ -67,13 +74,13 @@ export const getInventoryBatches = async (req, res) => {
     options.sort = { [sortField]: sortOrder === "desc" ? -1 : 1 };
   }
 
-  const result = await getBatches(filters, options);
+  const result = await getBatches(req.user.id, filters, options);
   return res.status(200).json({ success: true, ...result });
 };
 
 export const updateinventoryBatch = async (req, res) => {
   try {
-    const updatedBatch = await updateBatch(req.params.id, req.body);
+    const updatedBatch = await updateBatch(req.params.id, req.body, req.user.id);
     return res.status(200).json({
       success: true,
       message: "Batch updated successfully",
@@ -88,7 +95,7 @@ export const updateinventoryBatch = async (req, res) => {
 
 export const deleteInventoryBatch = async (req, res) => {
   try {
-    const result = await deleteBatch(req.params.id);
+    const result = await deleteBatch(req.params.id, req.user.id);
     return res.status(200).json({ success: true, ...result });
   } catch (error) {
     return res

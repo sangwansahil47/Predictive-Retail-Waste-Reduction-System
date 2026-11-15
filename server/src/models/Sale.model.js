@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 const saleSchema = new mongoose.Schema(
   {
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     productId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Product",
@@ -20,6 +21,7 @@ const saleSchema = new mongoose.Schema(
     },
     totalAmount: { type: Number, required: true, min: 0 },
     batchId: { type: String, trim: true },
+    uploadId: { type: mongoose.Schema.Types.ObjectId, ref: "Upload", index: true },
     date: { type: Date, default: Date.now, index: true },
     discountAppliedPercentage: { type: Number, default: 0, min: 0, max: 100 },
   },

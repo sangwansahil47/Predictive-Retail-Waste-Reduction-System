@@ -1,4 +1,5 @@
 import { parseSalesCsv } from "../utils/csvParser.js";
+import { runTrackedUpload } from "../services/upload.service.js";
 import { saveSalesBatch, getSales as getSalesPage } from "../services/salesService.js";
 
 export const uploadSalesCsv = async (req, res) => {
@@ -8,7 +9,13 @@ export const uploadSalesCsv = async (req, res) => {
     });
   }
   const batchId = `batch-${Date.now()}`;
-  const result = await parseSalesCsv(req.file.buffer, batchId, saveSalesBatch);
+  const result = await runTrackedUpload({
+    type: "sales",
+    file: req.file,
+    user: req.user,
+    parse: (buffer, onBatch) => parseSalesCsv(buffer, batchId, onBatch),
+    save: saveSalesBatch,
+  });
   return res.status(200).json({ success: true, batchId, ...result });
 };
 
@@ -24,6 +31,6 @@ export const getSales = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid sort field" });
     options.sort = { [sortField]: sortOrder === "asc" ? 1 : -1 };
   }
-  const result = await getSalesPage(filters, options);
+  const result = await getSalesPage(req.user.id, filters, options);
   return res.status(200).json({ success: true, ...result });
 };

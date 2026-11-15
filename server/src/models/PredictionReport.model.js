@@ -29,6 +29,7 @@ const productForecastSchema = new mongoose.Schema({
 
 const predictionReportSchema = new mongoose.Schema(
   {
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     storeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Store",

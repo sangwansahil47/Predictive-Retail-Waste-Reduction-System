@@ -23,9 +23,11 @@ function evaluateRisk(daysToExpire, daysNeededToSell) {
   return { riskLevel: "LOW", riskFactor, suggestedDiscountPercentage: 0 };
 }
 
-export async function generateDiscountRiskReport(storeId = null) {
+// Scoped to one account: only its forecasts, batches and products are used.
+export async function generateDiscountRiskReport(ownerId, storeId = null) {
   const storeObjectId = storeId ? new mongoose.Types.ObjectId(storeId) : null;
-  const predictionQuery = storeObjectId ? { storeId: storeObjectId } : {};
+  const predictionQuery = { owner: ownerId };
+  if (storeObjectId) predictionQuery.storeId = storeObjectId;
   const latestPrediction = await PredictionReport.findOne(predictionQuery).sort({
     createdAt: -1,
   });
@@ -39,14 +41,14 @@ export async function generateDiscountRiskReport(storeId = null) {
       item.dailyAverageQuantity,
     ]),
   );
-  const batchQuery = { quantityRemaining: { $gt: 0 } };
+  const batchQuery = { owner: ownerId, quantityRemaining: { $gt: 0 } };
   if (storeObjectId) batchQuery.storeId = storeObjectId;
   const activeBatches = await Batch.find(batchQuery).sort({
     expirationDate: 1,
     receivedDate: 1,
   });
   const productIds = [...new Set(activeBatches.map((batch) => batch.productId.toString()))];
-  const products = await Product.find({ _id: { $in: productIds } }).select("sku name");
+  const products = await Product.find({ owner: ownerId, _id: { $in: productIds } }).select("sku name");
   const productMap = new Map(products.map((product) => [product._id.toString(), product]));
   const now = Date.now();
   const highRiskBatches = [];
@@ -80,6 +82,7 @@ export async function generateDiscountRiskReport(storeId = null) {
   }
 
   return DiscountRiskReport.create({
+    owner: ownerId,
     storeId: storeObjectId?.toString() ?? null,
     generatedAt: new Date(),
     totalBatchesEvaluated: activeBatches.length,

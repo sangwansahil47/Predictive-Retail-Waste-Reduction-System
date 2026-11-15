@@ -7,6 +7,7 @@ import productRouter from "./product.route.js";
 import inventoryAnalysisRouter from "./invenotryAnalysis.route.js";
 import authRouter from "./auth.route.js";
 import predictionRouter from "./prediction.route.js";
+import uploadRouter from "./upload.route.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 
 const router = Router();
@@ -20,5 +21,6 @@ router.use("/product", requireAuth, productRouter);
 router.use("/store", requireAuth, storeRouter);
 router.use("/inventoryAnalysis", requireAuth, inventoryAnalysisRouter);
 router.use("/predict", requireAuth, predictionRouter);
+router.use("/uploads", requireAuth, uploadRouter);
 
 export default router;

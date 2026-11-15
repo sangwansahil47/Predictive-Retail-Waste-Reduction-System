@@ -4,14 +4,21 @@ import { Store } from "../models/Store.model.js";
 const invalidRequest = (message) => Object.assign(new Error(message), { status: 400 });
 const notFound = (message) => Object.assign(new Error(message), { status: 404 });
 
-export const saveStoreBatch = async (storeBatch) => {
+// Every function is scoped to one account (`ownerId`): it only ever reads or
+// changes that account's stores.
+
+export const saveStoreBatch = async (storeBatch, { ownerId, uploadId } = {}) => {
   if (!storeBatch.length) return;
-  return Store.insertMany(storeBatch, { ordered: true });
+  const docs = storeBatch.map((store) => ({ ...store, owner: ownerId, ...(uploadId && { uploadId }) }));
+  return Store.insertMany(docs, { ordered: true });
 };
 
-export const addStore = async (storeData) => Store.create(storeData);
+export const addStore = async (storeData, ownerId) => {
+  const { name, storeCode, location } = storeData || {};
+  return Store.create({ name, storeCode, location, owner: ownerId });
+};
 
-export const updateStore = async (id, storeData) => {
+export const updateStore = async (id, storeData, ownerId) => {
   if (!mongoose.isValidObjectId(id)) throw invalidRequest("Invalid store ID");
   if (!storeData || typeof storeData !== "object" || Array.isArray(storeData))
     throw invalidRequest("Invalid store update");
@@ -22,8 +29,8 @@ export const updateStore = async (id, storeData) => {
   if (Object.keys(filteredUpdates).length === 0)
     throw invalidRequest("No valid fields to update");
 
-  const updatedStore = await Store.findByIdAndUpdate(
-    id,
+  const updatedStore = await Store.findOneAndUpdate(
+    { _id: id, owner: ownerId },
     { $set: filteredUpdates },
     { new: true, runValidators: true },
   );
@@ -31,28 +38,29 @@ export const updateStore = async (id, storeData) => {
   return updatedStore;
 };
 
-export const deleteStore = async (id) => {
+export const deleteStore = async (id, ownerId) => {
   if (!mongoose.isValidObjectId(id)) throw invalidRequest("Invalid store ID");
-  const deletedStore = await Store.findByIdAndDelete(id);
+  const deletedStore = await Store.findOneAndDelete({ _id: id, owner: ownerId });
   if (!deletedStore) throw notFound("Store not found");
   return deletedStore;
 };
 
-export const getStore = async (id) => {
+export const getStore = async (id, ownerId) => {
   if (!mongoose.isValidObjectId(id)) throw invalidRequest("Invalid store ID");
-  const store = await Store.findById(id);
+  const store = await Store.findOne({ _id: id, owner: ownerId });
   if (!store) throw notFound("Store not found");
   return store;
 };
 
-export const getStores = async (filters = {}, options = {}) => {
+export const getStores = async (ownerId, filters = {}, options = {}) => {
   const page = Math.max(1, Number.parseInt(options.page, 10) || 1);
   const limit = Math.min(100, Math.max(1, Number.parseInt(options.limit, 10) || 10));
   const skip = (page - 1) * limit;
   const sort = options.sort || { name: 1 };
+  const query = { ...filters, owner: ownerId };
   const [stores, total] = await Promise.all([
-    Store.find(filters).sort(sort).skip(skip).limit(limit).lean(),
-    Store.countDocuments(filters),
+    Store.find(query).sort(sort).skip(skip).limit(limit).lean(),
+    Store.countDocuments(query),
   ]);
   return { stores, pagination: { total, page, pages: Math.ceil(total / limit), limit } };
 };

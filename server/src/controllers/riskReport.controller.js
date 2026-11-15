@@ -13,7 +13,7 @@ const validateStoreFilter = (storeId, res) => {
 export const generateRiskReport = async (req, res) => {
   const storeId = req.body?.storeId;
   if (!validateStoreFilter(storeId, res)) return;
-  const report = await generateDiscountRiskReport(storeId || null);
+  const report = await generateDiscountRiskReport(req.user.id, storeId || null);
   return res.status(201).json({
     success: true,
     message: "Discount risk report generated successfully.",
@@ -24,7 +24,8 @@ export const generateRiskReport = async (req, res) => {
 export const getLatestReport = async (req, res) => {
   const { storeId } = req.query;
   if (!validateStoreFilter(storeId, res)) return;
-  const query = storeId ? { storeId } : {};
+  const query = { owner: req.user.id };
+  if (storeId) query.storeId = storeId;
   const latestReport = await DiscountRiskReport.findOne(query).sort({ createdAt: -1 });
   if (!latestReport) {
     return res.status(404).json({
@@ -40,7 +41,8 @@ export const getAllDiscountRiskReports = async (req, res) => {
   if (!validateStoreFilter(storeId, res)) return;
   const page = Math.max(1, Number.parseInt(pageParam, 10) || 1);
   const limit = Math.min(100, Math.max(1, Number.parseInt(limitParam, 10) || 10));
-  const query = storeId ? { storeId } : {};
+  const query = { owner: req.user.id };
+  if (storeId) query.storeId = storeId;
   const [reports, totalReports] = await Promise.all([
     DiscountRiskReport.find(query)
       .sort({ createdAt: -1 })

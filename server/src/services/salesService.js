@@ -3,6 +3,7 @@ import { Sale } from "../models/Sale.model.js";
 import { Batch } from "../models/Batch.model.js";
 import { Product } from "../models/Product.model.js";
 import { Store } from "../models/Store.model.js";
+import { Upload } from "../models/Upload.model.js";
 
 const invalidRequest = (message) => Object.assign(new Error(message), { status: 400 });
 const pagination = (options = {}) => {
@@ -28,7 +29,9 @@ export const allocateFifoStock = (availableBatches, requestedQuantity, deduction
   return unfulfilled;
 };
 
-export const saveSalesBatch = async (records) => {
+// Scoped to one account (`ownerId`): SKUs, store codes and stock come only from
+// that account's data.
+export const saveSalesBatch = async (records, { ownerId, uploadId } = {}) => {
   if (!records.length) return;
 
   const skus = [...new Set(records.map(({ sku }) => sku))];
@@ -40,8 +43,8 @@ export const saveSalesBatch = async (records) => {
       // Sequential, not Promise.all: concurrent operations on the same transaction
       // session are rejected outside a sharded cluster ("active transaction number"
       // conflict) - a single session can only run one op at a time.
-      const products = await Product.find({ sku: { $in: skus } }).select("_id sku").session(session);
-      const stores = await Store.find({ storeCode: { $in: storeCodes } }).select("_id storeCode").session(session);
+      const products = await Product.find({ owner: ownerId, sku: { $in: skus } }).select("_id sku").session(session);
+      const stores = await Store.find({ owner: ownerId, storeCode: { $in: storeCodes } }).select("_id storeCode").session(session);
       const productsBySku = new Map(products.map((product) => [product.sku, product._id]));
       const storesByCode = new Map(stores.map((store) => [store.storeCode, store._id]));
       const batchesByInventoryKey = new Map();
@@ -58,6 +61,7 @@ export const saveSalesBatch = async (records) => {
         const inventoryKey = `${productId}:${storeId}`;
         if (!batchesByInventoryKey.has(inventoryKey)) {
           const batches = await Batch.find({
+            owner: ownerId,
             productId,
             storeId,
             quantityRemaining: { $gt: 0 },
@@ -87,6 +91,7 @@ export const saveSalesBatch = async (records) => {
         }
 
         saleDocuments.push({
+          owner: ownerId,
           productId,
           storeId,
           quantitySold: record.quantitySold,
@@ -94,6 +99,7 @@ export const saveSalesBatch = async (records) => {
           date: record.date,
           discountAppliedPercentage: record.discountAppliedPercentage,
           batchId: record.batchId,
+          ...(uploadId && { uploadId }),
         });
       }
 
@@ -110,13 +116,28 @@ export const saveSalesBatch = async (records) => {
           throw new Error("Inventory changed during sale processing; transaction aborted");
         }
       }
+      // Remember exactly how much stock this upload took from each batch, in the
+      // same transaction, so removing the upload can put it back.
+      if (uploadId && deductions.size > 0) {
+        await Upload.updateOne(
+          { _id: uploadId },
+          {
+            $push: {
+              stockDeductions: {
+                $each: [...deductions.values()].map(({ id, quantity }) => ({ batch: id, quantity })),
+              },
+            },
+          },
+          { session },
+        );
+      }
     });
   } finally {
     await session.endSession();
   }
 };
 
-export const getSales = async (filters = {}, options = {}) => {
+export const getSales = async (ownerId, filters = {}, options = {}) => {
   if (filters.storeId && !mongoose.isValidObjectId(filters.storeId))
     throw invalidRequest("Invalid store ID");
   if (filters.productId && !mongoose.isValidObjectId(filters.productId))
@@ -124,15 +145,16 @@ export const getSales = async (filters = {}, options = {}) => {
 
   const { page, limit, skip } = pagination(options);
   const sort = options.sort || { date: -1 };
+  const query = { ...filters, owner: ownerId };
   const [sales, total] = await Promise.all([
-    Sale.find(filters)
+    Sale.find(query)
       .populate("productId", "sku name")
       .populate("storeId", "storeCode name")
       .sort(sort)
       .skip(skip)
       .limit(limit)
       .lean(),
-    Sale.countDocuments(filters),
+    Sale.countDocuments(query),
   ]);
 
   return { sales, pagination: { total, page, pages: Math.ceil(total / limit), limit } };

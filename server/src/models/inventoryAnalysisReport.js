@@ -26,6 +26,7 @@ const productInventoryStatusSchema = new mongoose.Schema(
 
 const inventoryAnalysisReportSchema = new mongoose.Schema(
   {
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     storeId: { type: String, default: null },
     generatedAt: { type: Date, default: Date.now },
     totalProductsAnalyzed: { type: Number, required: true },

@@ -9,6 +9,7 @@ from .ML_pipeline import train_and_forecast_per_product
 app = FastAPI(title="Product Sales Prediction Engine", version="2.0")
 
 class ProductPredictionRequest(BaseModel):
+    owner_id: str = Field(..., description="Account (User Mongo ObjectId) whose data to forecast")
     store_id: Optional[str] = Field(None, description="Optional Store Mongo ObjectId")
     product_id: Optional[str] = Field(None, description="Optional single Product Mongo ObjectId filter")
     forecast_days: int = Field(default=30, ge=1, le=365, description="Number of future days to predict sales for")
@@ -22,8 +23,12 @@ async def generate_product_sales_prediction(
     request: ProductPredictionRequest,
     db = Depends(get_database)
 ):
-    # 1. Build Query Filter
-    query = {}
+    # 1. Build Query Filter - always limited to one account's sales
+    try:
+        owner_id = ObjectId(request.owner_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid owner_id format.")
+    query = {"owner": owner_id}
     if request.store_id:
         try:
             query["storeId"] = ObjectId(request.store_id)
@@ -63,6 +68,7 @@ async def generate_product_sales_prediction(
 
     # 4. Construct MongoDB Report Document
     report_doc = {
+        "owner": owner_id,
         "storeId": ObjectId(request.store_id) if request.store_id else None,
         "productIdFilter": ObjectId(request.product_id) if request.product_id else None,
         "modelUsed": request.model_type,

@@ -27,6 +27,7 @@ const batchRiskItemSchema = new mongoose.Schema(
 
 const discountRiskReportSchema = new mongoose.Schema(
   {
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     storeId: { type: String, default: null },
     generatedAt: { type: Date, default: Date.now },
     totalBatchesEvaluated: { type: Number, required: true },

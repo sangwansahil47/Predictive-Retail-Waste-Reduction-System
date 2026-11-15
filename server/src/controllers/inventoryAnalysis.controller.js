@@ -8,7 +8,7 @@ export const createInventoryAnalysisReport = async (req, res) => {
     if (storeId && !mongoose.isValidObjectId(storeId)) {
       return res.status(400).json({ success: false, message: "Invalid store ID" });
     }
-    const report = await generateInventoryAnalysisReport(storeId || null);
+    const report = await generateInventoryAnalysisReport(req.user.id, storeId || null);
 
     return res.status(201).json({
       success: true,
@@ -30,7 +30,8 @@ export const getLatestInventoryAnalysisReport = async (req, res) => {
     if (storeId && !mongoose.isValidObjectId(storeId)) {
       return res.status(400).json({ success: false, message: "Invalid store ID" });
     }
-    const query = storeId ? { storeId } : {};
+    const query = { owner: req.user.id };
+    if (storeId) query.storeId = storeId;
 
     const latestReport = await InventoryAnalysisReport.findOne(query).sort({
       createdAt: -1,
