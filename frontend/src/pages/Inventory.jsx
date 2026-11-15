@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
-import { listInventoryBatches, createInventoryBatch, updateInventoryBatch, deleteInventoryBatch } from "../api/inventory.js";
+import { listInventoryBatches, createInventoryBatch, updateInventoryBatch } from "../api/inventory.js";
+import { fetchAll } from "../api/fetchAll.js";
 import { listStores } from "../api/stores.js";
 import { listProducts } from "../api/products.js";
 import { extractErrorMessage } from "../api/client.js";
@@ -14,7 +15,14 @@ import Spinner from "../components/Spinner.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import ErrorState from "../components/ErrorState.jsx";
 import Badge from "../components/Badge.jsx";
+import Checkbox from "../components/Checkbox.jsx";
+import SelectionBar from "../components/SelectionBar.jsx";
+import ConfirmDeleteModal from "../components/ConfirmDeleteModal.jsx";
+import Pagination from "../components/Pagination.jsx";
+import useSelection from "../hooks/useSelection.js";
 import { formatDate, formatNumber } from "../utils/format.js";
+
+const PAGE_SIZE = 25;
 
 const daysUntil = (dateStr) => {
   const diff = (new Date(dateStr).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86400000;
@@ -151,16 +159,19 @@ export default function Inventory() {
   const [modal, setModal] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const [page, setPage] = useState(1);
+  const [confirm, setConfirm] = useState(null); // { selection, names }
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
-    listStores({ limit: 100 }).then((res) => setStores(res.stores || [])).catch(() => {});
-    listProducts({ limit: 200 }).then((res) => setProducts(res.products || [])).catch(() => {});
+    fetchAll(listStores, "stores").then(setStores).catch(() => {});
+    fetchAll(listProducts, "products").then(setProducts).catch(() => {});
   }, []);
 
   const load = (selectedStoreId) => {
     setState((s) => ({ ...s, loading: true, error: null }));
-    listInventoryBatches({ storeId: selectedStoreId || undefined, limit: 200, sortField: "expirationDate" })
-      .then((res) => setState({ loading: false, error: null, batches: res.batches || [] }))
+    fetchAll(listInventoryBatches, "batches", { storeId: selectedStoreId || undefined, sortField: "expirationDate" })
+      .then((batches) => setState({ loading: false, error: null, batches }))
       .catch((error) => setState({ loading: false, error: extractErrorMessage(error), batches: [] }));
   };
 
@@ -184,6 +195,39 @@ export default function Inventory() {
       return matchesCategory && matchesSearch;
     });
   }, [state.batches, category, search, categoryBySku]);
+
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pages);
+  const pageItems = useMemo(
+    () => filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [filtered, currentPage],
+  );
+  const pageIds = useMemo(() => pageItems.map((b) => b._id), [pageItems]);
+  const allIds = useMemo(() => filtered.map((b) => b._id), [filtered]);
+  const selection = useSelection(pageIds, allIds);
+  const { clear: clearSelection } = selection;
+
+  // A new search or filter starts from page 1 with nothing ticked, so hidden
+  // batches are never deleted by accident.
+  useEffect(() => {
+    setPage(1);
+    clearSelection();
+  }, [search, category, storeId, clearSelection]);
+
+  const openDeleteConfirm = () => {
+    const byId = new Map(state.batches.map((b) => [b._id, b]));
+    setConfirm({
+      selection: { batches: selection.selectedIds },
+      names: selection.selectedIds.map((id) => byId.get(id)?.batchId).filter(Boolean),
+    });
+  };
+
+  const handleDeleted = (deleted) => {
+    setConfirm(null);
+    clearSelection();
+    setNotice(`Deleted ${formatNumber(deleted.batches)} inventory batch${deleted.batches === 1 ? "" : "es"}.`);
+    load(storeId);
+  };
 
   const handleCreate = async (values) => {
     setSubmitting(true);
@@ -210,16 +254,6 @@ export default function Inventory() {
       setFormError(extractErrorMessage(error, "Could not update batch."));
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleDelete = async (batch) => {
-    if (!window.confirm(`Delete batch ${batch.batchId}? This cannot be undone.`)) return;
-    try {
-      await deleteInventoryBatch(batch._id);
-      load(storeId);
-    } catch (error) {
-      window.alert(extractErrorMessage(error, "Could not delete batch."));
     }
   };
 
@@ -253,6 +287,21 @@ export default function Inventory() {
         </Select>
       </div>
 
+      {notice && (
+        <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status">
+          {notice}
+        </p>
+      )}
+
+      <SelectionBar
+        selection={selection}
+        totalCount={filtered.length}
+        pageCount={pageItems.length}
+        noun="batch"
+        pluralNoun="batches"
+        onDelete={openDeleteConfirm}
+      />
+
       <Card className="p-0">
         {state.loading ? (
           <Spinner label="Loading inventory..." />
@@ -261,11 +310,30 @@ export default function Inventory() {
         ) : filtered.length === 0 ? (
           <EmptyState title="No inventory batches found" description="Upload an inventory CSV or add a batch manually." />
         ) : (
-          <Table columns={["Batch", "Product", "Store", "Qty left", "Received", "Expires", ""]}>
-            {filtered.map((b) => {
+          <>
+          <Table
+            columns={[
+              <Checkbox
+                key="all"
+                label="Select all batches on this page"
+                checked={selection.allPageSelected}
+                indeterminate={selection.somePageSelected}
+                onChange={selection.togglePage}
+              />,
+              "Batch", "Product", "Store", "Qty left", "Received", "Expires", "",
+            ]}
+          >
+            {pageItems.map((b) => {
               const days = daysUntil(b.expirationDate);
               return (
-                <tr key={b._id}>
+                <tr key={b._id} className={selection.isSelected(b._id) ? "bg-surface-soft" : ""}>
+                  <td className="w-10 px-4 py-3">
+                    <Checkbox
+                      label={`Select batch ${b.batchId}`}
+                      checked={selection.isSelected(b._id)}
+                      onChange={() => selection.toggle(b._id)}
+                    />
+                  </td>
                   <td className="px-4 py-3 font-mono text-xs text-muted">{b.batchId}</td>
                   <td className="px-4 py-3 font-medium text-ink">{b.productId?.name || "-"}</td>
                   <td className="px-4 py-3 text-muted">{b.storeId?.name || "-"}</td>
@@ -286,17 +354,28 @@ export default function Inventory() {
                       >
                         Edit
                       </button>
-                      <button className="text-xs font-medium text-danger underline" onClick={() => handleDelete(b)}>
-                        Delete
-                      </button>
                     </div>
                   </td>
                 </tr>
               );
             })}
           </Table>
+          <div className="px-4 pb-4">
+            <Pagination page={currentPage} pages={pages} onPageChange={setPage} />
+          </div>
+          </>
         )}
       </Card>
+
+      {confirm && (
+        <ConfirmDeleteModal
+          selection={confirm.selection}
+          primary="batches"
+          names={confirm.names}
+          onClose={() => setConfirm(null)}
+          onDeleted={handleDeleted}
+        />
+      )}
 
       {modal?.mode === "create" && (
         <Modal title="Add inventory batch" onClose={() => setModal(null)}>

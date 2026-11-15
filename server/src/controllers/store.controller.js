@@ -1,11 +1,13 @@
 import { parseStoreData } from "../utils/csvParser.js";
 import { runTrackedUpload } from "../services/upload.service.js";
+import { readCsvOptions } from "../utils/csvOptions.js";
+import mongoose from "mongoose";
+import { deleteSelection } from "../services/deletion.service.js";
 import {
   saveStoreBatch,
   addStore,
   updateStore,
   getStore,
-  deleteStore,
   getStores,
 } from "../services/store.service.js";
 
@@ -17,6 +19,7 @@ export const uploadStoreData = async (req, res) => {
     type: "stores",
     file: req.file,
     user: req.user,
+    options: readCsvOptions(req, "stores"),
     parse: parseStoreData,
     save: saveStoreBatch,
   });
@@ -46,9 +49,16 @@ export const getSingleStore = async (req, res) => {
   return res.status(200).json({ success: true, data: store });
 };
 
+// Also deletes the store's inventory batches and sales.
 export const deleteSingleStore = async (req, res) => {
-  const store = await deleteStore(req.params.id, req.user.id);
-  return res.status(200).json({ success: true, data: store });
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    return res.status(400).json({ success: false, message: "Invalid store ID" });
+  }
+  const deleted = await deleteSelection(req.user.id, { stores: [req.params.id] }, req.user);
+  if (deleted.stores === 0) {
+    return res.status(404).json({ success: false, message: "Store not found" });
+  }
+  return res.status(200).json({ success: true, deleted });
 };
 
 export const getAllStores = async (req, res) => {

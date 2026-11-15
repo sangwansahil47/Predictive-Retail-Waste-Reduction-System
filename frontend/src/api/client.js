@@ -38,6 +38,13 @@ apiClient.interceptors.response.use(
   },
 );
 
+// Column matching, separator and date format chosen on the upload screen.
+export const appendCsvOptions = (form, { mapping, separator, dateFormat } = {}) => {
+  if (mapping) form.append("mapping", JSON.stringify(mapping));
+  if (separator) form.append("separator", separator);
+  if (dateFormat) form.append("dateFormat", dateFormat);
+};
+
 export const extractErrorMessage = (error, fallback = "Something went wrong. Please try again.") => {
   return error?.response?.data?.message || error?.message || fallback;
 };

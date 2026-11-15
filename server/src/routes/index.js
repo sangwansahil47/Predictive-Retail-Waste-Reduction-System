@@ -8,6 +8,8 @@ import inventoryAnalysisRouter from "./invenotryAnalysis.route.js";
 import authRouter from "./auth.route.js";
 import predictionRouter from "./prediction.route.js";
 import uploadRouter from "./upload.route.js";
+import bulkDeleteRouter from "./bulkDelete.route.js";
+import columnMappingRouter from "./columnMapping.route.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 
 const router = Router();
@@ -22,5 +24,7 @@ router.use("/store", requireAuth, storeRouter);
 router.use("/inventoryAnalysis", requireAuth, inventoryAnalysisRouter);
 router.use("/predict", requireAuth, predictionRouter);
 router.use("/uploads", requireAuth, uploadRouter);
+router.use("/bulk-delete", requireAuth, bulkDeleteRouter);
+router.use("/column-mappings", requireAuth, columnMappingRouter);
 
 export default router;

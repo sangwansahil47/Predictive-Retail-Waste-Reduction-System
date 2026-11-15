@@ -1,5 +1,6 @@
 import { parseSalesCsv } from "../utils/csvParser.js";
 import { runTrackedUpload } from "../services/upload.service.js";
+import { readCsvOptions } from "../utils/csvOptions.js";
 import { saveSalesBatch, getSales as getSalesPage } from "../services/salesService.js";
 
 export const uploadSalesCsv = async (req, res) => {
@@ -13,7 +14,8 @@ export const uploadSalesCsv = async (req, res) => {
     type: "sales",
     file: req.file,
     user: req.user,
-    parse: (buffer, onBatch) => parseSalesCsv(buffer, batchId, onBatch),
+    options: readCsvOptions(req, "sales"),
+    parse: (buffer, onBatch, options) => parseSalesCsv(buffer, batchId, onBatch, options),
     save: saveSalesBatch,
   });
   return res.status(200).json({ success: true, batchId, ...result });

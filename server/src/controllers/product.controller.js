@@ -1,11 +1,13 @@
 import { parseProductData } from "../utils/csvParser.js";
 import { runTrackedUpload } from "../services/upload.service.js";
+import { readCsvOptions } from "../utils/csvOptions.js";
+import mongoose from "mongoose";
+import { deleteSelection } from "../services/deletion.service.js";
 import {
   saveProductBatch,
   saveProduct,
   updateProduct,
   getProduct,
-  deleteProduct,
   getProducts,
 } from "../services/product.service.js";
 
@@ -17,6 +19,7 @@ export const uploadProductData = async (req, res) => {
     type: "products",
     file: req.file,
     user: req.user,
+    options: readCsvOptions(req, "products"),
     parse: parseProductData,
     save: saveProductBatch,
   });
@@ -46,9 +49,16 @@ export const getSingleProduct = async (req, res) => {
   return res.status(200).json({ success: true, data: product });
 };
 
+// Also deletes the product's inventory batches and sales.
 export const deleteSingleProduct = async (req, res) => {
-  const product = await deleteProduct(req.params.id, req.user.id);
-  return res.status(200).json({ success: true, data: product });
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    return res.status(400).json({ success: false, message: "Invalid product ID" });
+  }
+  const deleted = await deleteSelection(req.user.id, { products: [req.params.id] }, req.user);
+  if (deleted.products === 0) {
+    return res.status(404).json({ success: false, message: "Product not found" });
+  }
+  return res.status(200).json({ success: true, deleted });
 };
 
 export const getAllProducts = async (req, res) => {

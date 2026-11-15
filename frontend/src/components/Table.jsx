@@ -4,8 +4,8 @@ export default function Table({ columns, children }) {
       <table className="w-full min-w-[640px] border-collapse text-left text-sm">
         <thead>
           <tr className="border-b border-hairline bg-surface-soft">
-            {columns.map((col) => (
-              <th key={col} className="whitespace-nowrap px-4 py-3 font-medium text-muted">
+            {columns.map((col, index) => (
+              <th key={index} className="whitespace-nowrap px-4 py-3 font-medium text-muted">
                 {col}
               </th>
             ))}

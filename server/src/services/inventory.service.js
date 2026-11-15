@@ -166,7 +166,7 @@ export const getBatches = async (ownerId, filters = {}, options = {}) => {
   const query = { ...filters, owner: ownerId };
   const page = Math.max(1, Number.parseInt(options.page, 10) || 1);
   const limit = Math.min(
-    100,
+    500,
     Math.max(1, Number.parseInt(options.limit, 10) || 10),
   );
   const skip = (page - 1) * limit;

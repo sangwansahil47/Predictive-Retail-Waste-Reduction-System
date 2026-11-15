@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
-import { listStores, createStore, updateStore, deleteStore } from "../api/stores.js";
+import { listStores, createStore, updateStore } from "../api/stores.js";
+import { fetchAll } from "../api/fetchAll.js";
 import { extractErrorMessage } from "../api/client.js";
 import Card from "../components/Card.jsx";
 import Button from "../components/Button.jsx";
@@ -10,6 +11,14 @@ import Modal from "../components/Modal.jsx";
 import Spinner from "../components/Spinner.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import ErrorState from "../components/ErrorState.jsx";
+import Checkbox from "../components/Checkbox.jsx";
+import SelectionBar from "../components/SelectionBar.jsx";
+import ConfirmDeleteModal from "../components/ConfirmDeleteModal.jsx";
+import Pagination from "../components/Pagination.jsx";
+import useSelection from "../hooks/useSelection.js";
+import { formatNumber } from "../utils/format.js";
+
+const PAGE_SIZE = 25;
 
 function StoreForm({ initialValues, onSubmit, onCancel, submitting, serverError }) {
   const {
@@ -43,15 +52,51 @@ export default function Stores() {
   const [modal, setModal] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const [page, setPage] = useState(1);
+  const [confirm, setConfirm] = useState(null); // { selection, names }
+  const [notice, setNotice] = useState("");
 
   const load = () => {
     setState((s) => ({ ...s, loading: true, error: null }));
-    listStores({ limit: 100 })
-      .then((res) => setState({ loading: false, error: null, stores: res.stores || [] }))
+    fetchAll(listStores, "stores")
+      .then((stores) => setState({ loading: false, error: null, stores }))
       .catch((error) => setState({ loading: false, error: extractErrorMessage(error), stores: [] }));
   };
 
   useEffect(load, []);
+
+  const pages = Math.max(1, Math.ceil(state.stores.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pages);
+  const pageItems = useMemo(
+    () => state.stores.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [state.stores, currentPage],
+  );
+  const pageIds = useMemo(() => pageItems.map((s) => s._id), [pageItems]);
+  const allIds = useMemo(() => state.stores.map((s) => s._id), [state.stores]);
+  const selection = useSelection(pageIds, allIds);
+  const { clear: clearSelection } = selection;
+
+  const openDeleteConfirm = () => {
+    const byId = new Map(state.stores.map((s) => [s._id, s]));
+    setConfirm({
+      selection: { stores: selection.selectedIds },
+      names: selection.selectedIds.map((id) => byId.get(id)?.name).filter(Boolean),
+    });
+  };
+
+  const handleDeleted = (deleted) => {
+    setConfirm(null);
+    clearSelection();
+    const extra = [
+      deleted.batches && `${formatNumber(deleted.batches)} inventory batches`,
+      deleted.sales && `${formatNumber(deleted.sales)} sales records`,
+    ].filter(Boolean);
+    setNotice(
+      `Deleted ${formatNumber(deleted.stores)} store${deleted.stores === 1 ? "" : "s"}` +
+        (extra.length ? ` and ${extra.join(" and ")}.` : "."),
+    );
+    load();
+  };
 
   const handleCreate = async (values) => {
     setSubmitting(true);
@@ -81,16 +126,6 @@ export default function Stores() {
     }
   };
 
-  const handleDelete = async (store) => {
-    if (!window.confirm(`Delete ${store.name}? This cannot be undone.`)) return;
-    try {
-      await deleteStore(store._id);
-      load();
-    } catch (error) {
-      window.alert(extractErrorMessage(error, "Could not delete store."));
-    }
-  };
-
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -101,6 +136,20 @@ export default function Stores() {
         <Button onClick={() => { setFormError(""); setModal({ mode: "create" }); }}>Add store</Button>
       </div>
 
+      {notice && (
+        <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status">
+          {notice}
+        </p>
+      )}
+
+      <SelectionBar
+        selection={selection}
+        totalCount={state.stores.length}
+        pageCount={pageItems.length}
+        noun="store"
+        onDelete={openDeleteConfirm}
+      />
+
       <Card className="p-0">
         {state.loading ? (
           <Spinner label="Loading stores..." />
@@ -109,9 +158,28 @@ export default function Stores() {
         ) : state.stores.length === 0 ? (
           <EmptyState title="No stores found" description="Upload a store CSV or add one manually." />
         ) : (
-          <Table columns={["Store code", "Name", "Location", ""]}>
-            {state.stores.map((s) => (
-              <tr key={s._id}>
+          <>
+          <Table
+            columns={[
+              <Checkbox
+                key="all"
+                label="Select all stores on this page"
+                checked={selection.allPageSelected}
+                indeterminate={selection.somePageSelected}
+                onChange={selection.togglePage}
+              />,
+              "Store code", "Name", "Location", "",
+            ]}
+          >
+            {pageItems.map((s) => (
+              <tr key={s._id} className={selection.isSelected(s._id) ? "bg-surface-soft" : ""}>
+                <td className="w-10 px-4 py-3">
+                  <Checkbox
+                    label={`Select ${s.name}`}
+                    checked={selection.isSelected(s._id)}
+                    onChange={() => selection.toggle(s._id)}
+                  />
+                </td>
                 <td className="px-4 py-3 font-mono text-xs text-muted">{s.storeCode}</td>
                 <td className="px-4 py-3 font-medium text-ink">{s.name}</td>
                 <td className="px-4 py-3 text-muted">{s.location}</td>
@@ -123,16 +191,27 @@ export default function Stores() {
                     >
                       Edit
                     </button>
-                    <button className="text-xs font-medium text-danger underline" onClick={() => handleDelete(s)}>
-                      Delete
-                    </button>
                   </div>
                 </td>
               </tr>
             ))}
           </Table>
+          <div className="px-4 pb-4">
+            <Pagination page={currentPage} pages={pages} onPageChange={setPage} />
+          </div>
+          </>
         )}
       </Card>
+
+      {confirm && (
+        <ConfirmDeleteModal
+          selection={confirm.selection}
+          primary="stores"
+          names={confirm.names}
+          onClose={() => setConfirm(null)}
+          onDeleted={handleDeleted}
+        />
+      )}
 
       {modal && (
         <Modal title={modal.mode === "create" ? "Add store" : "Edit store"} onClose={() => setModal(null)}>

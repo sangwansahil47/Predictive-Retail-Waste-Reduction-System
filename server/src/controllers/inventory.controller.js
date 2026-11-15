@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { parseInventoryCsv } from "../utils/csvParser.js";
 import { runTrackedUpload } from "../services/upload.service.js";
+import { readCsvOptions } from "../utils/csvOptions.js";
 import {
   saveInventoryBatch,
   addBatches,
@@ -20,6 +21,7 @@ export const uploadInventoryCsv = async (req, res) => {
     type: "inventory",
     file: req.file,
     user: req.user,
+    options: readCsvOptions(req, "inventory"),
     parse: parseInventoryCsv,
     save: saveInventoryBatch,
   });

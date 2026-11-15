@@ -38,13 +38,6 @@ export const updateProduct = async (id, updateData, ownerId) => {
   return updatedProduct;
 };
 
-export const deleteProduct = async (id, ownerId) => {
-  if (!mongoose.isValidObjectId(id)) throw invalidRequest("Invalid product ID");
-  const deletedProduct = await Product.findOneAndDelete({ _id: id, owner: ownerId });
-  if (!deletedProduct) throw notFound("Product not found");
-  return deletedProduct;
-};
-
 export const getProduct = async (id, ownerId) => {
   if (!mongoose.isValidObjectId(id)) throw invalidRequest("Invalid product ID");
   const product = await Product.findOne({ _id: id, owner: ownerId });
@@ -54,7 +47,7 @@ export const getProduct = async (id, ownerId) => {
 
 export const getProducts = async (ownerId, filters = {}, options = {}) => {
   const page = Math.max(1, Number.parseInt(options.page, 10) || 1);
-  const limit = Math.min(100, Math.max(1, Number.parseInt(options.limit, 10) || 10));
+  const limit = Math.min(500, Math.max(1, Number.parseInt(options.limit, 10) || 10));
   const skip = (page - 1) * limit;
   const sort = options.sort || { name: 1 };
   const query = { ...filters, owner: ownerId };

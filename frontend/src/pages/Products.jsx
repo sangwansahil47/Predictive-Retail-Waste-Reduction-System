@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
-import { listProducts, createProduct, updateProduct, deleteProduct } from "../api/products.js";
+import { listProducts, createProduct, updateProduct } from "../api/products.js";
+import { fetchAll } from "../api/fetchAll.js";
 import { extractErrorMessage } from "../api/client.js";
 import Card from "../components/Card.jsx";
 import Button from "../components/Button.jsx";
@@ -11,7 +12,14 @@ import Modal from "../components/Modal.jsx";
 import Spinner from "../components/Spinner.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import ErrorState from "../components/ErrorState.jsx";
-import { formatCurrency } from "../utils/format.js";
+import Checkbox from "../components/Checkbox.jsx";
+import SelectionBar from "../components/SelectionBar.jsx";
+import ConfirmDeleteModal from "../components/ConfirmDeleteModal.jsx";
+import Pagination from "../components/Pagination.jsx";
+import useSelection from "../hooks/useSelection.js";
+import { formatCurrency, formatNumber } from "../utils/format.js";
+
+const PAGE_SIZE = 25;
 
 const UNITS = ["pcs", "kg", "g", "pack"];
 
@@ -82,11 +90,14 @@ export default function Products() {
   const [modal, setModal] = useState(null); // { mode: 'create' | 'edit', product? }
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const [page, setPage] = useState(1);
+  const [confirm, setConfirm] = useState(null); // { selection, names }
+  const [notice, setNotice] = useState("");
 
   const load = () => {
     setState((s) => ({ ...s, loading: true, error: null }));
-    listProducts({ limit: 200, sortField: "name" })
-      .then((res) => setState({ loading: false, error: null, products: res.products || [] }))
+    fetchAll(listProducts, "products", { sortField: "name" })
+      .then((products) => setState({ loading: false, error: null, products }))
       .catch((error) => setState({ loading: false, error: extractErrorMessage(error), products: [] }));
   };
 
@@ -105,6 +116,46 @@ export default function Products() {
       return matchesSearch && matchesCategory;
     });
   }, [state.products, search, category]);
+
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pages);
+  const pageItems = useMemo(
+    () => filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [filtered, currentPage],
+  );
+  const pageIds = useMemo(() => pageItems.map((p) => p._id), [pageItems]);
+  const allIds = useMemo(() => filtered.map((p) => p._id), [filtered]);
+  const selection = useSelection(pageIds, allIds);
+  const { clear: clearSelection } = selection;
+
+  // A new search or filter starts from page 1 with nothing ticked, so hidden
+  // items are never deleted by accident.
+  useEffect(() => {
+    setPage(1);
+    clearSelection();
+  }, [search, category, clearSelection]);
+
+  const openDeleteConfirm = () => {
+    const byId = new Map(state.products.map((p) => [p._id, p]));
+    setConfirm({
+      selection: { products: selection.selectedIds },
+      names: selection.selectedIds.map((id) => byId.get(id)?.name).filter(Boolean),
+    });
+  };
+
+  const handleDeleted = (deleted) => {
+    setConfirm(null);
+    clearSelection();
+    const extra = [
+      deleted.batches && `${formatNumber(deleted.batches)} inventory batches`,
+      deleted.sales && `${formatNumber(deleted.sales)} sales records`,
+    ].filter(Boolean);
+    setNotice(
+      `Deleted ${formatNumber(deleted.products)} product${deleted.products === 1 ? "" : "s"}` +
+        (extra.length ? ` and ${extra.join(" and ")}.` : "."),
+    );
+    load();
+  };
 
   const handleCreate = async (values) => {
     setSubmitting(true);
@@ -134,16 +185,6 @@ export default function Products() {
     }
   };
 
-  const handleDelete = async (product) => {
-    if (!window.confirm(`Delete ${product.name}? This cannot be undone.`)) return;
-    try {
-      await deleteProduct(product._id);
-      load();
-    } catch (error) {
-      window.alert(extractErrorMessage(error, "Could not delete product."));
-    }
-  };
-
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -166,6 +207,20 @@ export default function Products() {
         </Select>
       </div>
 
+      {notice && (
+        <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status">
+          {notice}
+        </p>
+      )}
+
+      <SelectionBar
+        selection={selection}
+        totalCount={filtered.length}
+        pageCount={pageItems.length}
+        noun="product"
+        onDelete={openDeleteConfirm}
+      />
+
       <Card className="p-0">
         {state.loading ? (
           <Spinner label="Loading products..." />
@@ -174,9 +229,28 @@ export default function Products() {
         ) : filtered.length === 0 ? (
           <EmptyState title="No products found" description="Upload a product CSV or add one manually to get started." />
         ) : (
-          <Table columns={["SKU", "Name", "Category", "Unit", "Cost", "Selling price", "Shelf life", ""]}>
-            {filtered.map((p) => (
-              <tr key={p._id}>
+          <>
+          <Table
+            columns={[
+              <Checkbox
+                key="all"
+                label="Select all products on this page"
+                checked={selection.allPageSelected}
+                indeterminate={selection.somePageSelected}
+                onChange={selection.togglePage}
+              />,
+              "SKU", "Name", "Category", "Unit", "Cost", "Selling price", "Shelf life", "",
+            ]}
+          >
+            {pageItems.map((p) => (
+              <tr key={p._id} className={selection.isSelected(p._id) ? "bg-surface-soft" : ""}>
+                <td className="w-10 px-4 py-3">
+                  <Checkbox
+                    label={`Select ${p.name}`}
+                    checked={selection.isSelected(p._id)}
+                    onChange={() => selection.toggle(p._id)}
+                  />
+                </td>
                 <td className="px-4 py-3 font-mono text-xs text-muted">{p.sku}</td>
                 <td className="px-4 py-3 font-medium text-ink">{p.name}</td>
                 <td className="px-4 py-3 text-muted">{p.category}</td>
@@ -192,16 +266,27 @@ export default function Products() {
                     >
                       Edit
                     </button>
-                    <button className="text-xs font-medium text-danger underline" onClick={() => handleDelete(p)}>
-                      Delete
-                    </button>
                   </div>
                 </td>
               </tr>
             ))}
           </Table>
+          <div className="px-4 pb-4">
+            <Pagination page={currentPage} pages={pages} onPageChange={setPage} />
+          </div>
+          </>
         )}
       </Card>
+
+      {confirm && (
+        <ConfirmDeleteModal
+          selection={confirm.selection}
+          primary="products"
+          names={confirm.names}
+          onClose={() => setConfirm(null)}
+          onDeleted={handleDeleted}
+        />
+      )}
 
       {modal && (
         <Modal title={modal.mode === "create" ? "Add product" : "Edit product"} onClose={() => setModal(null)}>
